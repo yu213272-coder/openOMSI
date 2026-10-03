@@ -2568,6 +2568,33 @@ fn skip_detours(net: &Network, slots: &mut [Slot]) {
     }
 }
 
+pub(crate) fn autopilot_bridge_route(net: &Network, lanes: &[usize]) -> Vec<usize> {
+    let mut out = Vec::with_capacity(lanes.len());
+    for (k, &b) in lanes.iter().enumerate() {
+        if k > 0 {
+            let a = lanes[k - 1];
+            let gap = (net.lanes[b].start() - net.lanes[a].end()).length();
+            if gap > 1.5 {
+                // Timetable track lists can omit lanes. Use real directed graph edges,
+                // never a straight line between the two named tracks.
+                let candidate = way_between(net, a, b, (gap * 2.5 + 60.0) as f32);
+                let mut chain = vec![a];
+                if let Some(ref way) = candidate { chain.extend(way.iter().copied()); }
+                chain.push(b);
+                let continuous = candidate.is_some() && chain.windows(2).all(|w| {
+                    net.lanes[w[0]].next.contains(&w[1])
+                        && (net.lanes[w[1]].start() - net.lanes[w[0]].end()).length() <= 1.5
+                });
+                crate::ap_diagnostics::record("ROUTE_CONNECT", String::new(), format!("source_index={} from={a} key={:?} end={:?} next={:?} to={b} key={:?} start={:?} gap={gap:.3} candidate={candidate:?} accepted={continuous}", k - 1, net.lanes[a].key, net.lanes[a].end(), net.lanes[a].next, net.lanes[b].key, net.lanes[b].start()), true);
+                if continuous { out.extend(candidate.unwrap()); }
+            }
+        }
+        out.push(b);
+    }
+    crate::ap_diagnostics::record("ROUTE_CONNECT", String::new(), format!("route loaded: source_lanes={} connected_lanes={}", lanes.len(), out.len()), true);
+    out
+}
+
 /// Where consecutive lanes of a route do not join (a path the timetable file names that
 /// the map does not have any more, a junction a mod map edited after its tracks were
 /// made), the shortest way between them through the network, when there is one not much

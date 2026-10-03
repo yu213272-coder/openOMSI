@@ -2016,6 +2016,9 @@ impl ApplicationHandler for App {
                             (Some((key, name)), Some(sch), _, _) if nav.map_net().is_some() => {
                                 if nav.wants_route(&key, 0) {
                                     let lanes = sch.trip_route_in(nav.map_net().unwrap(), &name);
+                                    let lanes = if p.vehicle.var("ap_enabled").is_some() {
+                                        crate::schedule::autopilot_bridge_route(nav.map_net().unwrap(), &lanes)
+                                    } else { lanes };
                                     let g = nav.global_version + (1 << 40);
                                     nav.set_route(&key, lanes, true, g);
                                 }
