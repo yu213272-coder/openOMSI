@@ -1,0 +1,17 @@
+ap_enabled
+ap_fault
+ap_state
+ap_timer
+ap_served_id
+ap_button
+ap_bridge_valid
+ap_throttle
+ap_brake
+ap_steer
+ap_nav_steer
+ap_nav_speed
+ap_stop_distance
+ap_stop_id
+ap_terminal
+ap_target_speed
+ap_speed_error

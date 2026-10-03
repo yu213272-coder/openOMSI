@@ -1,0 +1,205 @@
+' Requires the version-pinned openOMSI engine bridge. Never writes AI ownership.
+
+{macro:ap_init}
+    0 (S.L.ap_enabled) (S.L.ap_fault) (S.L.ap_state)
+    0 (S.L.ap_timer) (S.L.ap_served_id) (S.L.ap_button)
+    0 (S.L.ap_bridge_valid) (S.L.ap_throttle) (S.L.ap_steer)
+    1 (S.L.ap_brake)
+{end}
+
+{trigger:ap_toggle}
+    1 (S.L.ap_button)
+    (L.L.ap_enabled)
+    {if}
+        0 (S.L.ap_enabled) (S.L.ap_state)
+        0 (S.L.ap_throttle)
+        1 (S.L.ap_brake)
+    {else}
+        (L.L.ap_bridge_valid)
+        (L.L.AI) ! &&
+        (L.L.Velocity) abs 0.5 < &&
+        (L.L.elec_busbar_main) &&
+        (L.L.engine_on) &&
+        (L.L.antrieb_getr_aktugang) 0 > &&
+        (L.L.bremse_feststell_sw) ! &&
+        (L.L.door_0) 0.05 < &&
+        (L.L.door_1) 0.05 < &&
+        (L.L.door_2) 0.05 < &&
+        (L.L.door_3) 0.05 < &&
+        (L.L.doorTarget_0) ! &&
+        (L.L.doorTarget_1) ! &&
+        (L.L.doorTarget_23) ! &&
+        (L.L.bremse_halte_sw) ! &&
+        {if}
+            1 (S.L.ap_enabled) (S.L.ap_state)
+            0 (S.L.ap_fault) (S.L.ap_timer) (S.L.ap_served_id)
+            0 (S.L.ap_throttle) (S.L.ap_steer)
+            1 (S.L.ap_brake)
+        {else}
+            1 (S.L.ap_fault)
+        {endif}
+    {endif}
+{end}
+
+{trigger:ap_toggle_off}
+    0 (S.L.ap_button)
+{end}
+
+{macro:ap_frame}
+    (L.L.ap_enabled)
+    {if}
+        (L.L.ap_bridge_valid) !
+        (L.L.AI) ||
+        (L.L.elec_busbar_main) ! ||
+        (L.L.engine_on) ! ||
+        (L.L.bremse_feststell_sw) ||
+        (L.L.antrieb_getr_aktugang) 0 > ! ||
+        (L.L.Velocity) -0.5 < ||
+        {if}
+            1 (S.L.ap_fault)
+        {endif}
+        0 (S.L.ap_throttle)
+        1 (S.L.ap_brake)
+        (L.L.ap_fault) !
+        {if}
+            (L.L.ap_nav_steer) -1 max 1 min (S.L.ap_steer)
+            (L.L.ap_state) 4 =
+            (L.L.ap_stop_id) (L.L.ap_served_id) = ! &&
+            {if}
+                1 (S.L.ap_state)
+            {endif}
+
+            (L.L.ap_state) 1 =
+            {if}
+                (L.L.ap_stop_distance) -2 <
+                {if}
+                    1 (S.L.ap_fault)
+                {else}
+                    (L.L.ap_stop_distance) 1 - 0 max 2.4 * sqrt 3.6 *
+                    (L.L.ap_nav_speed) min (S.L.ap_target_speed)
+                    (L.L.ap_stop_distance) 1 <=
+                    (L.L.Velocity) abs 0.3 < &&
+                    {if}
+                        2 (S.L.ap_state)
+                        0 (S.L.ap_timer)
+                    {else}
+                        (M.L.ap_speed_control)
+                    {endif}
+                {endif}
+            {endif}
+
+            (L.L.ap_state) 2 =
+            {if}
+                (L.L.Velocity) abs 0.3 <
+                {if}
+                    (L.L.bremse_halte_sw) !
+                    {if}
+                        (M.L.trg_bus_dooraft)
+                    {endif}
+                    (L.L.doorTarget_0) !
+                    {if}
+                        (M.L.trg_bus_doorfront0)
+                    {endif}
+                    (L.L.doorTarget_1) !
+                    {if}
+                        (M.L.trg_bus_doorfront1)
+                    {endif}
+                    (L.L.doorTarget_23) !
+                    {if}
+                        (M.L.trg_bus_doorback23)
+                    {endif}
+                    (L.L.door_0) 0.95 >
+                    (L.L.door_1) 0.95 > &&
+                    (L.L.door_2) 0.95 > &&
+                    (L.L.door_3) 0.95 > &&
+                    {if}
+                        (L.L.ap_timer) (L.S.Timegap) + (S.L.ap_timer)
+                        (L.L.ap_timer) 10 >=
+                        {if}
+                            (L.L.ap_terminal)
+                            {if}
+                                5 (S.L.ap_state)
+                            {else}
+                                3 (S.L.ap_state)
+                            {endif}
+                        {endif}
+                    {else}
+                        0 (S.L.ap_timer)
+                    {endif}
+                {else}
+                    1 (S.L.ap_fault)
+                {endif}
+            {endif}
+
+            (L.L.ap_state) 3 =
+            {if}
+                (L.L.doorTarget_0)
+                {if}
+                    (M.L.trg_bus_doorfront0)
+                {endif}
+                (L.L.doorTarget_1)
+                {if}
+                    (M.L.trg_bus_doorfront1)
+                {endif}
+                (L.L.doorTarget_23)
+                {if}
+                    (M.L.trg_bus_doorback23)
+                {endif}
+                (L.L.door_0) 0.05 <
+                (L.L.door_1) 0.05 < &&
+                (L.L.door_2) 0.05 < &&
+                (L.L.door_3) 0.05 < &&
+                {if}
+                    (L.L.bremse_halte_sw)
+                    {if}
+                        (M.L.trg_bus_dooraft)
+                    {endif}
+                    (L.L.ap_stop_id) (S.L.ap_served_id)
+                    4 (S.L.ap_state)
+                {endif}
+            {endif}
+
+            (L.L.ap_state) 4 =
+            {if}
+                (L.L.ap_nav_speed) 10 min (S.L.ap_target_speed)
+                (M.L.ap_speed_control)
+            {endif}
+
+            (L.L.ap_state) 1 = (L.L.ap_state) 4 = ||
+            {if}
+                (L.L.door_0) 0.05 >=
+                (L.L.door_1) 0.05 >= ||
+                (L.L.door_2) 0.05 >= ||
+                (L.L.door_3) 0.05 >= ||
+                (L.L.doorTarget_0) ||
+                (L.L.doorTarget_1) ||
+                (L.L.doorTarget_23) ||
+                (L.L.bremse_halte_sw) ||
+                {if}
+                    1 (S.L.ap_fault)
+                {endif}
+            {endif}
+        {endif}
+        (L.L.ap_fault)
+        {if}
+            0 (S.L.ap_throttle)
+            1 (S.L.ap_brake)
+        {endif}
+    {endif}
+{end}
+
+{macro:ap_speed_control}
+    (L.L.ap_target_speed) (L.L.Velocity) - (S.L.ap_speed_error)
+    (L.L.ap_speed_error) 0.5 >
+    {if}
+        (L.L.ap_speed_error) 0.08 * 0.6 min 0 max (S.L.ap_throttle)
+        0 (S.L.ap_brake)
+    {else}
+        0 (S.L.ap_throttle)
+        (L.L.ap_speed_error) -0.08 * 0 max 1 min (S.L.ap_brake)
+        (L.L.ap_target_speed) 0.1 <
+        {if}
+            1 (S.L.ap_brake)
+        {endif}
+    {endif}
+{end}

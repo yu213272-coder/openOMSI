@@ -439,6 +439,13 @@ impl Navigator {
         self.global.as_deref()
     }
 
+    pub(crate) fn autopilot_route(&self) -> Option<(&Network, &[usize], usize, &str)> {
+        if !self.route.complete || self.route.provisional || self.route.approach {
+            return None;
+        }
+        Some((self.map_net()?, &self.route.lanes, self.route.progress, &self.route.key))
+    }
+
     /// The map's lanes, for a session without a traffic system (added as tiles stream in).
     pub fn add_lanes(&mut self, lanes: Vec<omsi_sim::traffic::Lane>) {
         if lanes.is_empty() {

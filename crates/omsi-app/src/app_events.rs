@@ -874,6 +874,7 @@ impl ApplicationHandler for App {
                         w.terrains.read().contains_key(&k) || w.surfaces.read().contains_key(&k)
                     });
                     if !self.paused && ground_here {
+                        p.autopilot_navigation(self.navigator.as_ref(), self.duty.as_ref(), self.lan.is_some());
                         p.tick(
                             dt,
                             self.audio.as_ref(),

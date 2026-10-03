@@ -1,0 +1,60 @@
+name: Faraway Autopilot Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/faraway-autopilot]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faraway-autopilot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: faraway-windows-x64
+      - name: Build Windows x64
+        shell: cmd
+        run: scripts\build-windows.cmd x86_64-pc-windows-msvc
+      - name: Include Visual C++ runtime
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory | Sort-Object FullName | Select-Object -Last 1
+          if (!$crt) { throw "Visual C++ runtime was not found" }
+          foreach ($dll in "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll") {
+            Copy-Item (Join-Path $crt.FullName $dll) dist/windows/
+          }
+      - name: Include DirectX shader compiler
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R microsoft/DirectXShaderCompiler --pattern "dxc_*.zip" -D dxc
+          $zip = Get-ChildItem dxc/*.zip | Where-Object { $_.Name -notmatch "linux|pdb" } | Select-Object -First 1
+          if (!$zip) { throw "DirectX shader compiler archive was not found" }
+          Expand-Archive $zip.FullName -DestinationPath dxc/x
+          Copy-Item dxc/x/bin/x64/dxcompiler.dll, dxc/x/bin/x64/dxil.dll dist/windows/
+      - name: Package
+        shell: pwsh
+        run: |
+          Copy-Item README.md, LICENSE dist/windows/
+          New-Item -ItemType Directory -Force dist/windows/vehicle-module | Out-Null
+          Copy-Item -Recurse integrations/faraway-autopilot dist/windows/vehicle-module/autopilot
+          New-Item -ItemType Directory -Force out | Out-Null
+          Compress-Archive -Path dist/windows/* -DestinationPath out/openOMSI-faraway-autopilot-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openOMSI-faraway-autopilot-windows-x64
+          path: out/openOMSI-faraway-autopilot-windows-x64.zip
+          if-no-files-found: error

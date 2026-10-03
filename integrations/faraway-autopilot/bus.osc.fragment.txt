@@ -1,0 +1,6 @@
+' This vehicle uses Script System\main\main.osc, not bus.osc.
+' Insert inside the existing {init}, before {end}:
+    (M.L.ap_init)
+
+' Insert at the start of the existing {frame}, before Engine_Frame:
+    (M.L.ap_frame)

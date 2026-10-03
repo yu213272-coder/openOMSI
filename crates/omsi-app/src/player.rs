@@ -1442,6 +1442,89 @@ impl Player {
         }
     }
 
+    pub(crate) fn autopilot_navigation(
+        &mut self,
+        nav: Option<&crate::navigator::Navigator>,
+        duty: Option<&crate::schedule::PlayerDuty>,
+        multiplayer: bool,
+    ) {
+        self.vehicle.set_var("ap_bridge_valid", 0.0);
+        if multiplayer { return; }
+        let data = (|| {
+            let d = duty?;
+            if d.trip_done() { return None; }
+            let (net, route, progress, key) = nav?.autopilot_route()?;
+            if key != format!("{}/{}", d.trip_index, d.trip().name) || route.is_empty() { return None; }
+            let stop_index = (d.next_stop..d.trip().stops.len()).find(|&i| d.trip().stops[i].stops)?;
+            let stop = &d.trip().stops[stop_index];
+            let at = stop.position?;
+            let stop_id = (d.trip_index * 10000 + stop_index + 1) as f32;
+            let start = progress.saturating_sub(1).min(route.len() - 1);
+            let end = (progress + 5).min(route.len());
+            let (local, s, _) = net.project_on_route_lateral(&route[start..end], self.vehicle.position)?;
+            let ri = start + local;
+            if net.lanes[route[ri]].nearest_point(self.vehicle.position)?.1 > 2.0 { return None; }
+            let h = self.vehicle.heading.to_radians();
+            let forward = glam::DVec2::new(h.sin(), h.cos());
+            let right = glam::DVec2::new(h.cos(), -h.sin());
+            let (_, lane_heading) = net.lanes[route[ri]].at(s);
+            if omsi_sim::traffic::wrap_deg(lane_heading - self.vehicle.heading as f32).abs() > 45.0 { return None; }
+            let distance = if self.vehicle.var("ap_served_id") == Some(stop_id)
+                && self.vehicle.var("ap_state") == Some(4.0)
+            {
+                10000.0
+            } else {
+                let (stop_ri, stop_s, _) = net.project_stop_on_route(route, at, Some(12.0), ri)?;
+                if stop_ri < ri { return None; }
+                let mut dist = stop_s - s;
+                for i in ri..stop_ri { dist += net.lanes[route[i]].length(); }
+                dist
+            };
+            let speed = self.vehicle.physics.velocity_kmh().max(0.0) / 3.6;
+            let lookahead = (4.0 + speed * 0.8).clamp(4.0, 15.0);
+            let mut remaining = s + lookahead;
+            let mut target_ri = ri;
+            while remaining > net.lanes[route[target_ri]].length() {
+                remaining -= net.lanes[route[target_ri]].length();
+                let next = target_ri + 1;
+                if next >= route.len() {
+                    remaining = net.lanes[route[target_ri]].length();
+                    break;
+                }
+                if (net.lanes[route[target_ri]].end() - net.lanes[route[next]].start()).length() > 1.5 { return None; }
+                target_ri = next;
+            }
+            let target = net.lanes[route[target_ri]].at(remaining).0;
+            let (rotation, wheelbase) = omsi_sim::ai_motion::rotation_point(&self.vehicle.ty.def);
+            let rear = self.vehicle.position.truncate() + forward * rotation as f64;
+            let delta = target.truncate() - rear;
+            if delta.dot(forward) < 0.5 { return None; }
+            let curvature = (2.0 * delta.dot(right) / delta.length_squared().max(1.0)) as f32;
+            let lock = self.vehicle.ty.def.inv_min_turn_radius;
+            if lock <= 0.0 { return None; }
+            let steer = if self.vehicle.rigid.is_some() {
+                (curvature / lock).clamp(-1.0, 1.0)
+            } else {
+                ((curvature * wheelbase).atan().to_degrees() / self.vehicle.physics.max_steer_deg).clamp(-1.0, 1.0)
+            };
+            let mut curve = curvature.abs();
+            for i in ri..=target_ri {
+                curve = curve.max(net.lanes[route[i]].curvature_at(if i == ri { s } else { 0.0 }).abs());
+            }
+            let target_speed = (1.2 / curve.max(0.001)).sqrt().min(25.0 / 3.6) * 3.6;
+            let terminal = !d.trip().stops[stop_index + 1..].iter().any(|s| s.stops);
+            Some((steer, target_speed, distance, stop_id, terminal))
+        })();
+        if let Some((steer, target_speed, distance, stop_id, terminal)) = data {
+            self.vehicle.set_var("ap_nav_steer", steer);
+            self.vehicle.set_var("ap_nav_speed", target_speed);
+            self.vehicle.set_var("ap_stop_distance", distance);
+            self.vehicle.set_var("ap_stop_id", stop_id);
+            self.vehicle.set_var("ap_terminal", if terminal { 1.0 } else { 0.0 });
+            self.vehicle.set_var("ap_bridge_valid", 1.0);
+        }
+    }
+
     pub(crate) fn tick(&mut self, dt: f32, audio: Option<&omsi_audio::AudioEngine>, inside: bool, listener_follows_bus: bool) {
         self.tick_startup(dt);
         self.tick_auto_drag(dt);
@@ -1457,7 +1540,7 @@ impl Player {
         }
         self.auto_clutch_bite(a.throttle.unwrap_or(0.0).max(self.axes.throttle));
         self.tick_auto_shift(dt, a.throttle.unwrap_or(0.0).max(self.axes.throttle), a.brake.unwrap_or(0.0).max(self.axes.brake));
-        self.vehicle.set_controls(omsi_sim::Controls {
+        let mut controls = omsi_sim::Controls {
             throttle: a.throttle.unwrap_or(self.axes.throttle).max(self.axes.throttle),
             brake: a.brake.unwrap_or(self.axes.brake).max(self.axes.brake),
             clutch: a.clutch.unwrap_or(self.axes.clutch).max(self.axes.clutch),
@@ -1466,7 +1549,27 @@ impl Player {
                 Some(s) if s.abs() > 0.02 || self.axes.steering == 0.0 => s,
                 _ => self.axes.steering,
             },
-        });
+        };
+        if self.vehicle.var("ap_enabled").unwrap_or(0.0) > 0.5 {
+            if self.vehicle.var("ap_bridge_valid").unwrap_or(0.0) < 0.5
+                || self.vehicle.var("ap_fault").unwrap_or(0.0) > 0.5
+            {
+                controls.throttle = 0.0;
+                controls.brake = 1.0;
+                controls.steering = self.vehicle.physics.controls.steering;
+            } else {
+                controls.throttle = self.vehicle.var("ap_throttle").unwrap_or(0.0).clamp(0.0, 0.6);
+                controls.brake = self.vehicle.var("ap_brake").unwrap_or(1.0).clamp(0.0, 1.0);
+                controls.steering = self.vehicle.var("ap_steer").unwrap_or(0.0).clamp(-1.0, 1.0);
+            }
+            // The driver's brake always takes precedence over automatic commands.
+            if a.brake.unwrap_or(0.0).max(self.axes.brake) > 0.1 {
+                controls.throttle = 0.0;
+                controls.brake = controls.brake.max(a.brake.unwrap_or(0.0).max(self.axes.brake));
+                self.vehicle.set_var("ap_fault", 1.0);
+            }
+        }
+        self.vehicle.set_controls(controls);
         let lever = self.vehicle.var("lights_sw_blinker");
         self.vehicle.update(dt);
         if let Some(keep) = kept_indicator(self.blinker_cancel, lever, self.vehicle.var("lights_sw_blinker")) {
