@@ -446,6 +446,13 @@ impl Navigator {
         Some((self.map_net()?, &self.route.lanes, self.route.progress, &self.route.key))
     }
 
+    pub(crate) fn autopilot_description(&self) -> String {
+        format!("complete={} provisional={} approach={} on_route={} joined={} progress={} s={:.3} lanes={} key={:?} global={} generation={} global_version={}",
+            self.route.complete, self.route.provisional, self.route.approach, self.route.on_route,
+            self.route.joined, self.route.progress, self.route.s, self.route.lanes.len(), self.route.key,
+            self.global.is_some(), self.route.generation, self.global_version)
+    }
+
     /// The map's lanes, for a session without a traffic system (added as tiles stream in).
     pub fn add_lanes(&mut self, lanes: Vec<omsi_sim::traffic::Lane>) {
         if lanes.is_empty() {

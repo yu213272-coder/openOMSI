@@ -10,6 +10,7 @@
 //! window of one process.
 
 mod admin;
+mod ap_diagnostics;
 mod discord;
 mod headtrack;
 #[cfg(windows)]

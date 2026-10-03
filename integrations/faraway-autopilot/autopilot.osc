@@ -5,6 +5,7 @@
     0 (S.L.ap_timer) (S.L.ap_served_id) (S.L.ap_button)
     0 (S.L.ap_bridge_valid) (S.L.ap_throttle) (S.L.ap_steer)
     1 (S.L.ap_brake)
+    0 (S.L.ap_nav_reason) (S.L.ap_fault_reason)
 {end}
 
 {trigger:ap_toggle}
@@ -33,9 +34,11 @@
         {if}
             1 (S.L.ap_enabled) (S.L.ap_state)
             0 (S.L.ap_fault) (S.L.ap_timer) (S.L.ap_served_id)
+            0 (S.L.ap_fault_reason)
             0 (S.L.ap_throttle) (S.L.ap_steer)
             1 (S.L.ap_brake)
         {else}
+            102 (S.L.ap_fault_reason)
             1 (S.L.ap_fault)
         {endif}
     {endif}
@@ -56,6 +59,10 @@
         (L.L.antrieb_getr_aktugang) 0 > ! ||
         (L.L.Velocity) -0.5 < ||
         {if}
+            (L.L.ap_fault) !
+            {if}
+                103 (S.L.ap_fault_reason)
+            {endif}
             1 (S.L.ap_fault)
         {endif}
         0 (S.L.ap_throttle)
@@ -73,6 +80,7 @@
             {if}
                 (L.L.ap_stop_distance) -2 <
                 {if}
+                    104 (S.L.ap_fault_reason)
                     1 (S.L.ap_fault)
                 {else}
                     (L.L.ap_stop_distance) 1 - 0 max 2.4 * sqrt 3.6 *
@@ -127,6 +135,7 @@
                         0 (S.L.ap_timer)
                     {endif}
                 {else}
+                    105 (S.L.ap_fault_reason)
                     1 (S.L.ap_fault)
                 {endif}
             {endif}
@@ -176,6 +185,7 @@
                 (L.L.doorTarget_23) ||
                 (L.L.bremse_halte_sw) ||
                 {if}
+                    106 (S.L.ap_fault_reason)
                     1 (S.L.ap_fault)
                 {endif}
             {endif}

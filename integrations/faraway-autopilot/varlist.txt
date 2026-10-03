@@ -15,3 +15,5 @@ ap_stop_id
 ap_terminal
 ap_target_speed
 ap_speed_error
+ap_nav_reason
+ap_fault_reason

@@ -663,6 +663,9 @@ impl Player {
     /// Fire a keyboard action as a script trigger, falling back to the names the stock
     /// scripts use for it. Returns whether any script block ran.
     pub(crate) fn action(&mut self, name: &str, pressed: bool) -> bool {
+        if name.eq_ignore_ascii_case("ap_toggle") {
+            crate::ap_diagnostics::record("KEY", String::new(), format!("pressed={pressed} trigger_present={} {}", self.vehicle.ty.program.trigger(name).is_some(), crate::ap_diagnostics::vehicle(&self.vehicle)), true);
+        }
         if pressed {
             log::info!("action: {name}");
         }
@@ -1449,33 +1452,51 @@ impl Player {
         multiplayer: bool,
     ) {
         self.vehicle.set_var("ap_bridge_valid", 0.0);
-        if multiplayer { return; }
+        if self.vehicle.var("ap_enabled").is_none() { return; }
+        let mut trace = vec![format!("multiplayer={multiplayer} position={:?} heading={:.3} kmh={:.3} rigid={}", self.vehicle.position, self.vehicle.heading, self.vehicle.physics.velocity_kmh(), self.vehicle.rigid.is_some())];
+        macro_rules! required {
+            ($value:expr, $code:expr, $message:expr) => {
+                $value.ok_or_else(|| ($code, $message.to_string()))?
+            };
+        }
         let data = (|| {
-            let d = duty?;
-            if d.trip_done() { return None; }
-            let (net, route, progress, key) = nav?.autopilot_route()?;
-            if key != format!("{}/{}", d.trip_index, d.trip().name) || route.is_empty() { return None; }
-            let stop_index = (d.next_stop..d.trip().stops.len()).find(|&i| d.trip().stops[i].stops)?;
+            if multiplayer { return Err((1, "multiplayer disabled".to_string())); }
+            let d = required!(duty, 2, "no timetable duty");
+            trace.push(format!("trip_index={} trip={:?} next_stop={} trip_done={}", d.trip_index, d.trip().name, d.next_stop, d.trip_done()));
+            if d.trip_done() { return Err((3, "trip complete".to_string())); }
+            let n = required!(nav, 4, "navigator unavailable");
+            trace.push(n.autopilot_description());
+            let (net, route, progress, key) = required!(n.autopilot_route(), 5, "route unavailable: inspect complete/provisional/approach/global flags");
+            if key != format!("{}/{}", d.trip_index, d.trip().name) { return Err((6, "route key does not match duty".to_string())); }
+            if route.is_empty() { return Err((7, "route has no lanes".to_string())); }
+            let stop_index = required!((d.next_stop..d.trip().stops.len()).find(|&i| d.trip().stops[i].stops), 8, "no remaining scheduled stop");
             let stop = &d.trip().stops[stop_index];
-            let at = stop.position?;
+            trace.push(format!("stop_index={stop_index} stop_id={} stop={:?} position={:?} inbound={:?} outbound={:?} arr={} dep={}", stop.object_id, stop.name, stop.position, stop.dir.inbound, stop.dir.outbound, stop.arr, stop.dep));
+            let at = required!(stop.position, 9, "stop position unknown");
             let stop_id = (d.trip_index * 10000 + stop_index + 1) as f32;
             let start = progress.saturating_sub(1).min(route.len() - 1);
             let end = (progress + 5).min(route.len());
-            let (local, s, _) = net.project_on_route_lateral(&route[start..end], self.vehicle.position)?;
+            trace.push(format!("projection_window={start}..{end} route_lanes={:?}", &route[start..end]));
+            let (local, s, lateral) = required!(net.project_on_route_lateral(&route[start..end], self.vehicle.position), 10, "bus projection failed");
             let ri = start + local;
-            if net.lanes[route[ri]].nearest_point(self.vehicle.position)?.1 > 2.0 { return None; }
+            let nearest = required!(net.lanes[route[ri]].nearest_point(self.vehicle.position), 11, "selected lane has no projection");
+            trace.push(format!("route_index={ri} lane_index={} lane_key={:?} lane_length={} s={s:.3} lateral={lateral:.3} distance_3d={:.3} limit=2.0", route[ri], net.lanes[route[ri]].key, net.lanes[route[ri]].length(), nearest.1));
+            if nearest.1 > 2.0 { return Err((12, "bus more than 2m from selected lane (3D distance)".to_string())); }
             let h = self.vehicle.heading.to_radians();
             let forward = glam::DVec2::new(h.sin(), h.cos());
             let right = glam::DVec2::new(h.cos(), -h.sin());
             let (_, lane_heading) = net.lanes[route[ri]].at(s);
-            if omsi_sim::traffic::wrap_deg(lane_heading - self.vehicle.heading as f32).abs() > 45.0 { return None; }
+            let heading_error = omsi_sim::traffic::wrap_deg(lane_heading - self.vehicle.heading as f32).abs();
+            trace.push(format!("lane_heading={lane_heading:.3} heading_error={heading_error:.3} limit=45"));
+            if heading_error > 45.0 { return Err((13, "heading differs from route by more than 45 degrees".to_string())); }
             let distance = if self.vehicle.var("ap_served_id") == Some(stop_id)
                 && self.vehicle.var("ap_state") == Some(4.0)
             {
                 10000.0
             } else {
-                let (stop_ri, stop_s, _) = net.project_stop_on_route(route, at, Some(12.0), ri)?;
-                if stop_ri < ri { return None; }
+                let (stop_ri, stop_s, stop_lateral) = required!(net.project_stop_on_route(route, at, Some(12.0), ri), 14, "stop projection failed within 12m");
+                trace.push(format!("stop_route_index={stop_ri} stop_s={stop_s:.3} stop_lateral={stop_lateral:.3}"));
+                if stop_ri < ri { return Err((15, "stop projects behind current route index".to_string())); }
                 let mut dist = stop_s - s;
                 for i in ri..stop_ri { dist += net.lanes[route[i]].length(); }
                 dist
@@ -1491,17 +1512,20 @@ impl Player {
                     remaining = net.lanes[route[target_ri]].length();
                     break;
                 }
-                if (net.lanes[route[target_ri]].end() - net.lanes[route[next]].start()).length() > 1.5 { return None; }
+                let gap = (net.lanes[route[target_ri]].end() - net.lanes[route[next]].start()).length();
+                trace.push(format!("lookahead_join={target_ri}->{next} gap={gap:.3} limit=1.5"));
+                if gap > 1.5 { return Err((16, "lookahead crosses a road gap larger than 1.5m".to_string())); }
                 target_ri = next;
             }
             let target = net.lanes[route[target_ri]].at(remaining).0;
             let (rotation, wheelbase) = omsi_sim::ai_motion::rotation_point(&self.vehicle.ty.def);
             let rear = self.vehicle.position.truncate() + forward * rotation as f64;
             let delta = target.truncate() - rear;
-            if delta.dot(forward) < 0.5 { return None; }
+            trace.push(format!("stop_distance={distance:.3} lookahead={lookahead:.3} target_route_index={target_ri} target_s={remaining:.3} target={target:?} rotation={rotation} wheelbase={wheelbase} rear={rear:?} delta={delta:?} forward_dot={:.3}", delta.dot(forward)));
+            if delta.dot(forward) < 0.5 { return Err((17, "lookahead target is behind rear axle".to_string())); }
             let curvature = (2.0 * delta.dot(right) / delta.length_squared().max(1.0)) as f32;
             let lock = self.vehicle.ty.def.inv_min_turn_radius;
-            if lock <= 0.0 { return None; }
+            if lock <= 0.0 { return Err((18, "vehicle steering curvature limit is zero or negative".to_string())); }
             let steer = if self.vehicle.rigid.is_some() {
                 (curvature / lock).clamp(-1.0, 1.0)
             } else {
@@ -1513,15 +1537,27 @@ impl Player {
             }
             let target_speed = (1.2 / curve.max(0.001)).sqrt().min(25.0 / 3.6) * 3.6;
             let terminal = !d.trip().stops[stop_index + 1..].iter().any(|s| s.stops);
-            Some((steer, target_speed, distance, stop_id, terminal))
+            trace.push(format!("curvature={curvature:.6} curve={curve:.6} lock={lock:.6} steer={steer:.4} speed={target_speed:.3} stop_id={stop_id} terminal={terminal}"));
+            if ![steer, target_speed, distance, curvature, lock].iter().all(|v| v.is_finite()) { return Err((19, "non-finite navigation output".to_string())); }
+            Ok((steer, target_speed, distance, stop_id, terminal))
         })();
-        if let Some((steer, target_speed, distance, stop_id, terminal)) = data {
-            self.vehicle.set_var("ap_nav_steer", steer);
-            self.vehicle.set_var("ap_nav_speed", target_speed);
-            self.vehicle.set_var("ap_stop_distance", distance);
-            self.vehicle.set_var("ap_stop_id", stop_id);
-            self.vehicle.set_var("ap_terminal", if terminal { 1.0 } else { 0.0 });
-            self.vehicle.set_var("ap_bridge_valid", 1.0);
+        let code = match data {
+            Ok((steer, target_speed, distance, stop_id, terminal)) => {
+                self.vehicle.set_var("ap_nav_steer", steer);
+                self.vehicle.set_var("ap_nav_speed", target_speed);
+                self.vehicle.set_var("ap_stop_distance", distance);
+                self.vehicle.set_var("ap_stop_id", stop_id);
+                self.vehicle.set_var("ap_terminal", if terminal { 1.0 } else { 0.0 });
+                self.vehicle.set_var("ap_bridge_valid", 1.0);
+                trace.push("ACCEPT".to_string());
+                0
+            }
+            Err((code, reason)) => { trace.push(format!("REJECT code={code} reason={reason}")); code }
+        };
+        self.vehicle.set_var("ap_nav_reason", code as f32);
+        crate::ap_diagnostics::record("NAV", code.to_string(), trace.join(" | "), false);
+        if code != 0 && self.vehicle.var("ap_enabled").unwrap_or(0.0) > 0.5 && self.vehicle.var("ap_fault").unwrap_or(0.0) < 0.5 {
+            crate::ap_diagnostics::record("FAULT", String::new(), format!("navigation invalid before controls; code={code} {}", crate::ap_diagnostics::vehicle(&self.vehicle)), true);
         }
     }
 
@@ -1564,14 +1600,26 @@ impl Player {
             }
             // The driver's brake always takes precedence over automatic commands.
             if a.brake.unwrap_or(0.0).max(self.axes.brake) > 0.1 {
+                if self.vehicle.var("ap_fault").unwrap_or(0.0) < 0.5 {
+                    crate::ap_diagnostics::record("FAULT", String::new(), format!("driver brake priority: keyboard_brake={} analog_brake={:?} brake_hold={} {}", self.axes.brake, a.brake, self.axes.pedal_hold, crate::ap_diagnostics::vehicle(&self.vehicle)), true);
+                    self.vehicle.set_var("ap_fault_reason", 101.0);
+                }
                 controls.throttle = 0.0;
                 controls.brake = controls.brake.max(a.brake.unwrap_or(0.0).max(self.axes.brake));
                 self.vehicle.set_var("ap_fault", 1.0);
             }
         }
         self.vehicle.set_controls(controls);
+        let ap_before = (self.vehicle.var("ap_enabled"), self.vehicle.var("ap_fault"), self.vehicle.var("ap_state"));
         let lever = self.vehicle.var("lights_sw_blinker");
         self.vehicle.update(dt);
+        if self.vehicle.var("ap_enabled").is_some() {
+            let ap_after = (self.vehicle.var("ap_enabled"), self.vehicle.var("ap_fault"), self.vehicle.var("ap_state"));
+            if ap_before.1.unwrap_or(0.0) < 0.5 && ap_after.1.unwrap_or(0.0) > 0.5 {
+                crate::ap_diagnostics::record("FAULT", String::new(), format!("OSC latched fault; before={ap_before:?} after={ap_after:?} {}", crate::ap_diagnostics::vehicle(&self.vehicle)), true);
+            }
+            crate::ap_diagnostics::record("CONTROL", format!("{ap_after:?}"), format!("dt={dt:.6} before={ap_before:?} after={ap_after:?} applied={controls:?} keyboard_throttle={} keyboard_brake={} keyboard_steer={} analog_throttle={:?} analog_brake={:?} analog_steer={:?} {}", self.axes.throttle, self.axes.brake, self.axes.steering, a.throttle, a.brake, a.steering, crate::ap_diagnostics::vehicle(&self.vehicle)), ap_before != ap_after);
+        }
         if let Some(keep) = kept_indicator(self.blinker_cancel, lever, self.vehicle.var("lights_sw_blinker")) {
             self.vehicle.set_var("lights_sw_blinker", keep);
         }

@@ -873,6 +873,9 @@ impl ApplicationHandler for App {
                         let k = ((at.x / omsi_map::tile_size()).floor() as i32, (at.y / omsi_map::tile_size()).floor() as i32);
                         w.terrains.read().contains_key(&k) || w.surfaces.read().contains_key(&k)
                     });
+                    if p.vehicle.var("ap_enabled").is_some() {
+                        crate::ap_diagnostics::record("TICK_GATE", format!("{}:{ground_here}", self.paused), format!("paused={} ground_here={ground_here}", self.paused), false);
+                    }
                     if !self.paused && ground_here {
                         p.autopilot_navigation(self.navigator.as_ref(), self.duty.as_ref(), self.lan.is_some());
                         p.tick(

@@ -1,0 +1,277 @@
+'########################################
+'#                                      #
+'#              MAIN SCRIPT             #
+'#                                      #
+'#    MAN Standarddoppeldecker SD200    #
+'#                                      #
+'#             Bauart SD85              #
+'#                                      #
+'########################################
+
+'(c) 10.08.2009 Marcel Kuhnt, Rüdiger Hülsmann
+
+'Script Version: 1.0
+'Omsi release: 1.0
+
+
+'Revision History:
+'- Marcel Kuhnt		10.08.2009	Added Revision History
+'- Marcel Kuhnt		30.11.2010	Bugfix: press [D] in AI mode if motor running but neutral
+
+'------------------------------------------------------------------------------------------
+
+
+'######################
+'	Hauptteil
+'######################
+
+{init}
+	(M.L.engine_Init)
+	(M.L.Antrieb_Init)
+	(M.L.Elec_Init)
+	(M.L.Door_Init)
+	(M.L.wiper_init)
+	(M.L.lights_init)
+	(M.L.bremse_init)
+	(M.L.cockpit_init)
+	(M.L.heizung_init)
+	(M.L.Matrix_init)
+	(M.L.IBIS_init)
+	(M.L.Collision_Init)
+	(M.L.ticketprinter_init)
+	(M.L.DLC_init)
+	(M.L.GZID_init)
+'	(M.L.articulation_init)
+'
+'	(C.L.Ledout_mode) 1 = 
+'	{if}
+'	(M.L.B_Matrix_init)
+'	{endif}
+'
+'	(C.L.Ledin_mode) 0 =
+'	(C.L.Ledin_mode) 1 = ||
+'	{if}
+'	(M.L.B2_Matrix_init)
+'	{endif}
+'
+'	(C.L.Ledin_mode) 0 =
+'	(C.L.Ledin_mode) 2 = ||
+'	{if}
+'	(M.L.K_Matrix_init)
+'	{endif}
+
+	1 (S.L.CGG)
+	(M.L.ap_init)
+{end}
+
+{frame}
+	(M.L.ap_frame)
+	(M.L.Engine_Frame)
+	(M.L.Antrieb_Frame)
+	(M.L.Elec_Frame)
+	(M.L.Door_frame)
+	(M.L.cockpit_frame)
+	(M.L.lights_frame)
+	(M.L.wiper_frame)
+	(M.L.Auspuff_Frame)
+	(M.L.bremse_frame)
+	(M.L.klappern_frame)
+	(M.L.FF_frame)
+	(M.L.rain_frame)
+	(M.L.dirt_frame)
+	(M.L.sound_volume_frame)
+	(M.L.heizung_frame)
+	(M.L.spray_frame)
+	(M.L.IBIS_frame)
+	(M.L.Matrix_frame)
+	(M.L.wimpel_frame)
+	(M.L.cashdesk_frame)
+	(M.L.ticketprinter_frame)
+'	(M.L.articulation_frame)
+'	(M.L.B_Matrix_frame)
+'	(M.L.B2_Matrix_frame)
+'	(M.L.K_Matrix_frame)
+	(M.L.windows_frame)
+	(M.L.DLC_frame)
+
+(L.$.ident) $length 8 > 
+{if}
+	1 (S.L.new_ident)
+{else}
+	(L.$.ident) $length 8 <
+	{if} 
+		2 (S.L.new_ident)
+	{else}
+		0 (S.L.new_ident)
+	{endif}
+{endif}
+
+(L.L.lusterko_podzielone)
+(L.L.lusterka_duze) ! &&
+{if}
+	1 (S.L.lusterko_podzielone_zezwolono)
+{else}
+	0 (S.L.lusterko_podzielone_zezwolono)
+{endif}
+
+(L.L.lusterko_podzielone) !
+(L.L.lusterka_duze) ! &&
+{if}
+	1 (S.L.lusterko_niepodzielone_zezwolono)
+{else}
+	0 (S.L.lusterko_niepodzielone_zezwolono)
+{endif}
+
+
+(L.L.komin_wydech)
+{if}
+	1 (S.L.komin)
+{endif}
+
+	(L.L.Euro_6) (L.L.komin) && (S.L.KOMIN_E6)
+	(L.L.Euro_6_cummins) (L.L.komin) && (S.L.KOMIN_E6_CUMMINS)
+	(L.L.Euro_6) ! (L.L.Euro_6_cummins) ! && (L.L.komin) && (S.L.KOMIN_EEV)
+
+(L.L.podloga_okragla)
+(L.L.podloga_wcieta) &&
+{if}
+	0 (S.L.podloga_wcieta)
+{endif}
+
+
+(L.L.klima_nowa) !
+(L.L.klima_stara) ! &&
+{if}
+	1 (S.L.brak_klimy)
+{else}
+	0 (S.L.brak_klimy)
+{endif}
+	
+(L.L.zf)
+{if}
+	1 (S.L.przyciski_zf)
+{endif}
+
+(L.L.klima_kier_spheros)
+(L.L.klima_kier_konvekta) &&
+{if}
+	0 (S.L.klima_kier_spheros)
+{endif}
+
+(C.L.Euro_4)
+(S.L.Euro_4)
+
+(C.L.Euro_6)
+(S.L.Euro_6)
+
+(C.L.Euro_6_cummins)
+(S.L.Euro_6_cummins)
+
+(L.L.Euro_6) 0 =
+(L.L.Euro_6_cummins) 0 = &&
+(L.L.Euro_4) 0 = &&
+(S.L.EEV)
+
+	(C.L.MT) (S.L.MT)
+	(C.L.CLUTCH) (S.L.CLUTCH1)
+	(C.L.EATON) (S.L.EATON)
+	(C.L.ALLISON) (S.L.ALLISON)
+	(C.L.AMT) (S.L.AMT)
+	(C.L.DNR) (S.L.DNR)
+	(C.L.SONGZHENG) (S.L.SONGZHENG)
+
+
+(L.L.DRL)
+{if}
+	(L.L.elec_Busbar_main)
+	(L.L.engine_n) 300 > &&
+	(L.L.cp_schluessel_rot) 0.2 < &&
+	(L.L.Engine_hybrid_on) (L.L.cp_schluessel_rot) 0.2 < && ||
+	{if}
+		1 (S.L.DRL_light)
+	{else}
+		0 (S.L.DRL_light)
+	{endif}
+{endif}
+
+(L.L.Euro_6)
+(L.L.Euro_6_cummins) ||
+{if}
+	(L.L.DRL)
+	{if}
+		(L.L.elec_Busbar_main)
+		(L.L.engine_n) 300 > &&
+		(L.L.cp_schluessel_rot) 0.2 < &&
+		(L.L.Engine_hybrid_on) (L.L.cp_schluessel_rot) 0.2 < && ||
+		{if}
+			1 (S.L.DRL_light)
+		{else}
+			0 (S.L.DRL_light)
+		{endif}
+	{else}
+		(L.L.elec_Busbar_main)
+		(L.L.engine_n) 300 > &&
+		(L.L.cp_schluessel_rot) 0.2 < &&
+		(L.L.Engine_hybrid_on) (L.L.cp_schluessel_rot) 0.2 < && ||
+		{if}
+			1 (S.L.DRL_E6Light)
+		{else}
+			0 (S.L.DRL_E6Light)
+		{endif}
+	{endif}
+{endif}
+
+
+'AI:
+
+	(L.L.AI_Engine) 0.5 >
+	(L.L.engine_on) 0.5 <
+	(L.L.antrieb_getr_gangvorwahl) 4 = ! ||
+	&&
+	{if}
+		0 (S.L.bremse_feststell_sw) (S.L.bremse_feststell)
+		1 (S.L.engine_injection_on)
+		400 (S.L.engine_n)
+		4 (S.L.antrieb_getr_gangvorwahl)
+		1 (S.L.engine_on)
+	{endif}
+
+	(L.L.AI_Engine) -0.5 <
+	(L.L.engine_on) 0.5 >
+	&&
+	{if}
+		0 (S.L.engine_on)
+		0 (S.L.engine_injection_on)
+		1 (S.L.bremse_feststell_sw) (S.L.bremse_feststell)
+	{endif}
+
+
+
+
+{end}
+
+'----------------------------------
+'Crash:
+
+{trigger:collision}
+	(M.L.Collision_Trigger)
+{end}
+
+
+'----------------------------------
+'malfunction reset:
+
+
+{trigger:malfunction_reset}
+	1.0 (S.L.elec_V_battery)
+	(M.L.Collision_Malfunction_Reset)
+	60 (S.L.engine_temperature)
+{end}
+
+
+
+
+
+
+
+

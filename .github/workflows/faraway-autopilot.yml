@@ -51,6 +51,8 @@ jobs:
           Copy-Item README.md, LICENSE dist/windows/
           New-Item -ItemType Directory -Force dist/windows/vehicle-module | Out-Null
           Copy-Item -Recurse integrations/faraway-autopilot dist/windows/vehicle-module/autopilot
+          Copy-Item -Recurse integrations/faraway-autopilot/diagnostics/plugins dist/windows/plugins
+          Copy-Item integrations/faraway-autopilot/diagnostics/start-autopilot-debug.cmd, integrations/faraway-autopilot/diagnostics/LOGGING.md dist/windows/
           New-Item -ItemType Directory -Force out | Out-Null
           Compress-Archive -Path dist/windows/* -DestinationPath out/openOMSI-faraway-autopilot-windows-x64.zip
       - uses: actions/upload-artifact@v4
